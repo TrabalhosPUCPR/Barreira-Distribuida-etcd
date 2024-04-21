@@ -1,28 +1,42 @@
 import time
-
 import etcd3
 
 tag_processos_total = "processos_total"
-tag_processos_finalizados = "processos_finalizados"
 tag_barreira = "barreira"
 
-client = etcd3.client()
+def etcd3_get_int(client,key) -> int:
+    res = client.get(key)[0]
+    if(res == None): 
+        return 0
+    else: 
+        return int(res.decode('utf-8'))        
 
-barreira: etcd3.Lock = client.lock(tag_barreira)
-processos = client.get(tag_processos_total)
-if processos is None:
-    processos = 0
-client.put(tag_processos_total, processos+1)
+def etcd3_put(client, key, value):
+    client.put(key, f"{value}")
 
-for i in range(0, 10, 1):
-    print(i)
-    time.sleep(1)
+def run():
+    client = etcd3.client()
+    lock: etcd3.Lock = client.lock(tag_barreira, ttl=60)
+    lock.acquire(None)
+    processos = etcd3_get_int(client, tag_processos_total)
+    etcd3_put(client,tag_processos_total,processos+1)
+    lock.release()
+    for i in range(0, 10, 1):
+        print(i)
+        time.sleep(1)
+    print("Chegou na barreira")
+    lock.acquire(None)
+    processos = etcd3_get_int(client, tag_processos_total)   
+    if processos > 0:
+        etcd3_put(client, tag_processos_total, processos-1)
+        processos = processos-1
+    lock.release()
+    while processos > 0:
+        processos = etcd3_get_int(client, tag_processos_total)
+    print("saiu da barreira")
+    lock.refresh()
+    print("fim")
 
-print("Chegou na barreira")
-if client.get(tag_processos_total) == client.get(tag_processos_finalizados):
-    barreira.release()
-barreira.acquire()
-barreira.release()
-
-print("Saiu da barreira")
+if __name__ == "__main__":
+    run()
 
